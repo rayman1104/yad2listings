@@ -237,6 +237,40 @@ def create_dashboard(df, port=8050):
                 ),
             ], style=styles['filter']),
             
+            # New price range filter
+            html.Div([
+                html.Label("Price Range (₪):", style=styles['label']),
+                html.Div([
+                    dcc.Input(
+                        id='min-price',
+                        type='number',
+                        placeholder='Min Price',
+                        value=1000,
+                        style={
+                            'width': '100%',
+                            'height': '36px',
+                            'padding': '8px',
+                            'border': '1px solid #ddd',
+                            'borderRadius': '4px',
+                            'marginBottom': '10px'
+                        }
+                    ),
+                    dcc.Input(
+                        id='max-price',
+                        type='number',
+                        placeholder='Max Price',
+                        value=250000,
+                        style={
+                            'width': '100%',
+                            'height': '36px',
+                            'padding': '8px',
+                            'border': '1px solid #ddd',
+                            'borderRadius': '4px'
+                        }
+                    ),
+                ], style={'width': '100%'})
+            ], style=styles['filter']),
+            
             # New model multi-select dropdown
             html.Div([
                 html.Label("Filter by model:", style=styles['label']),
@@ -379,10 +413,12 @@ def create_dashboard(df, port=8050):
          Input('hand-filter', 'value'),
          Input('model-filter', 'value'),
          Input('apply-submodel-button', 'n_clicks'),
-         Input('adtype-filter', 'value')],
+         Input('adtype-filter', 'value'),
+         Input('min-price', 'value'),
+         Input('max-price', 'value')],
         [State('submodel-checklist', 'value')]
     )
-    def update_graph(km_range, hand, models, submodel_btn_clicks, adtype, submodel_list):
+    def update_graph(km_range, hand, models, submodel_btn_clicks, adtype, min_price, max_price, submodel_list):
         # Apply filters
         filtered_df = df.copy()
         
@@ -405,10 +441,15 @@ def create_dashboard(df, port=8050):
         if submodel_list and len(submodel_list) > 0:
             # If checkboxes are selected, filter to only those submodels
             filtered_df = filtered_df[filtered_df['subModel'].isin(submodel_list)]
-        # When no checkboxes are selected, show all submodels
             
         if adtype != 'all':
             filtered_df = filtered_df[filtered_df['listingType'] == adtype]
+            
+        # Apply price range filters
+        if min_price is not None and min_price > 0:
+            filtered_df = filtered_df[filtered_df['price'] >= min_price]
+        if max_price is not None and max_price > 0:
+            filtered_df = filtered_df[filtered_df['price'] <= max_price]
         
         # For car price analysis, we want newest cars on the left and oldest on the right
         # First, calculate "days since newest car" for each point
@@ -723,7 +764,7 @@ def create_dashboard(df, port=8050):
     
     # Run the app
     print(f"Starting dashboard on http://127.0.0.1:{port}/")
-    app.run_server(debug=False, port=port)
+    app.run(debug=False, port=port)
 
 def main():
     args = parse_arguments()

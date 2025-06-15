@@ -1,2 +1,3 @@
 scraped_vehicles/*
 *.pyc
+venv/
