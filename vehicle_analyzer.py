@@ -69,6 +69,9 @@ def load_data(csv_path):
         # Extract year from production date for easier filtering
         df['productionYear'] = df['productionDate'].dt.year
         
+        # Add a formatted production date for hover display
+        df['productionDateStr'] = df['productionDate'].dt.strftime('%Y-%m')
+        
         return df
     except Exception as e:
         print(f"Error loading data: {str(e)}")
@@ -477,6 +480,9 @@ def create_dashboard(df, port=8050):
             title=f'Vehicle Prices by Age ({len(filtered_df)} vehicles)'
         )
         
+        # Add a formatted production date for hover display
+        filtered_df['productionDateStr'] = filtered_df['productionDate'].dt.strftime('%Y-%m')
+        
         # Create custom data array for hover and click functionality
         custom_data = np.column_stack((
             filtered_df['model'], 
@@ -484,7 +490,7 @@ def create_dashboard(df, port=8050):
             filtered_df['hand'], 
             filtered_df['km'], 
             filtered_df['city'],
-            filtered_df['productionDate'],
+            filtered_df['productionDateStr'],
             filtered_df['link']
         ))
         
@@ -633,6 +639,28 @@ def create_dashboard(df, port=8050):
                         name='Exponential Trend',
                         line=dict(color='red', width=3, dash='solid'),
                         hoverinfo='none'  # Disable hover for the trendline to keep it clean
+                    ))
+
+                    # Add yearly dots on the trend line
+                    # Calculate yearly intervals
+                    years_range = np.arange(0, x.max() + 365, 365)  # Add points every 365 days
+                    yearly_dates = [newest_date - pd.Timedelta(days=int(days)) for days in years_range]
+                    yearly_prices = exp_decay_with_offset(years_range, a, b, c)
+
+                    # Add the yearly dots
+                    fig.add_trace(go.Scatter(
+                        x=today - pd.to_timedelta(years_range, unit='D'),
+                        y=yearly_prices,
+                        mode='markers',
+                        name='Yearly Points',
+                        marker=dict(
+                            size=10,
+                            color='red',
+                            symbol='circle',
+                            line=dict(width=2, color='white')
+                        ),
+                        hoverinfo='text',
+                        hovertext=[f'Year {i}: ₪{price:,.0f}' for i, price in enumerate(yearly_prices)]
                     ))
                     
                 except Exception as e:

@@ -1,3 +1,6 @@
 scraped_vehicles/*
 *.pyc
 venv/
+.env
+.vscode/
+*.session.sql

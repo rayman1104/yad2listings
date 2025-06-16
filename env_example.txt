@@ -1,0 +1,12 @@
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Database Configuration
+DATABASE_URL=postgresql://username:password@localhost:5432/yad2_vehicles
+
+# Bot Configuration
+CHECK_INTERVAL_SECONDS=60
+
+# Optional: Additional configuration
+LOG_LEVEL=INFO 
