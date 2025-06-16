@@ -3,20 +3,36 @@ Configuration file for Yad2 Telegram Bot
 """
 import os
 from typing import List, Dict
+from urllib.parse import urlparse, parse_qs
 
 # Vehicle search configurations
-# Find manufacturer and model IDs from Yad2 URLs like:
-# https://www.yad2.co.il/vehicles/cars?manufacturer=19&model=12894
+# Example URL format:
+# https://www.yad2.co.il/vehicles/cars?manufacturer=17&model=10182&price=-1-60000&km=-1-100000
 
 VEHICLE_CONFIGS: List[Dict] = [
     {
-        'manufacturer': 17,    # Honda
-        'model': 10182,        # Civic
+        'url': 'https://www.yad2.co.il/vehicles/cars?manufacturer=17&model=10182&price=-1-60000&km=-1-100000',
         'name': 'Honda Civic',
         'max_pages': 5,
         'enabled': True
     },
 ]
+
+def parse_yad2_url(url: str) -> Dict:
+    """Parse Yad2 URL to extract search parameters"""
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    
+    # Convert single-item lists to single values
+    params = {k: v[0] if len(v) == 1 else v for k, v in params.items()}
+    
+    return {
+        'manufacturer': int(params.get('manufacturer', 0)),
+        'model': int(params.get('model', 0)),
+        'price_range': params.get('price', None),
+        'km_range': params.get('km', None),
+        # Add more parameters as needed
+    }
 
 # Bot settings
 BOT_SETTINGS = {
@@ -49,8 +65,11 @@ DATABASE_SETTINGS = {
 }
 
 def get_enabled_vehicle_configs() -> List[Dict]:
-    """Get only enabled vehicle configurations"""
-    return [config for config in VEHICLE_CONFIGS if config.get('enabled', True)]
+    """Get only enabled vehicle configurations with parsed URL parameters"""
+    enabled_configs = [config for config in VEHICLE_CONFIGS if config.get('enabled', True)]
+    for config in enabled_configs:
+        config.update(parse_yad2_url(config['url']))
+    return enabled_configs
 
 def get_vehicle_config_by_name(name: str) -> Dict:
     """Get vehicle configuration by name"""

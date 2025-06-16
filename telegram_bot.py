@@ -177,14 +177,18 @@ Newest entry: {stats['newest_entry']}
                 manufacturer = config['manufacturer']
                 model = config['model']
                 max_pages = config.get('max_pages', 5)
+                price_range = config.get('price_range')
+                km_range = config.get('km_range')
                 
-                logger.info(f"Checking {config['name']} (manufacturer={manufacturer}, model={model})")
+                logger.info(f"Checking {config['name']} (URL: {config.get('url')})")
                 
                 # Create a temporary scraper instance
                 scraper = VehicleScraper(
                     output_dir="temp_bot_scraping",
                     manufacturer=manufacturer,
-                    model=model
+                    model=model,
+                    price_range=price_range,
+                    km_range=km_range
                 )
                 
                 # Fetch first page only for frequent checks

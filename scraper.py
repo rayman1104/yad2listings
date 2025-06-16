@@ -7,7 +7,7 @@ import logging
 import yad2_parser
 
 class VehicleScraper:
-    def __init__(self, output_dir, manufacturer, model):
+    def __init__(self, output_dir, manufacturer, model, price_range=None, km_range=None):
         """
         Initialize the scraper with output directory and vehicle parameters
         
@@ -15,10 +15,14 @@ class VehicleScraper:
             output_dir (str): Directory to save the scraped files
             manufacturer (int): Manufacturer ID
             model (int): Model ID
+            price_range (str, optional): Price range in format "min-max" or "-1-max"
+            km_range (str, optional): Kilometer range in format "min-max" or "-1-max"
         """
         self.output_dir = Path(output_dir)
         self.manufacturer = manufacturer
         self.model = model
+        self.price_range = price_range
+        self.km_range = km_range
         self.session = requests.Session()
         
         # Set up headers exactly as in the curl command
@@ -66,15 +70,16 @@ class VehicleScraper:
         params = {
             "manufacturer": self.manufacturer,
             "model": self.model,
-            # "carFamilyType": "5,10",
-            # "year": "2022--1",
-            # "price": "110000-190000",
-            # "km": "-1-60000",
-            # # "km": "-1-50000",
             "hand": "0-2",
-            # "imgOnly": "1",
             "page": page_num
         }
+        
+        # Add optional parameters if provided
+        if self.price_range:
+            params["price"] = self.price_range
+        if self.km_range:
+            params["km"] = self.km_range
+            
         return f"{base_url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
 
     def get_output_filename(self, page_num):

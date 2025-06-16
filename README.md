@@ -87,25 +87,32 @@ python setup.py
 
 ### 4. Configure Vehicle Searches
 
-Edit the `search_configs` in `telegram_bot.py`:
+Edit the `VEHICLE_CONFIGS` in `config.py`:
 
 ```python
-self.search_configs = [
+VEHICLE_CONFIGS = [
     {
-        'manufacturer': 17,    # Honda
-        'model': 10182,        # Civic  
+        'url': 'https://www.yad2.co.il/vehicles/cars?manufacturer=17&model=10182&price=-1-60000&km=-1-100000',
         'name': 'Honda Civic',
-        'max_pages': 5
+        'max_pages': 5,
+        'enabled': True
     },
     {
-        'manufacturer': 32,    # Nissan
-        'model': 10449,        # Model ID
-        'name': 'Nissan Model', 
-        'max_pages': 5
+        'url': 'https://www.yad2.co.il/vehicles/cars?manufacturer=32&model=10449&price=-1-80000',
+        'name': 'Nissan Model',
+        'max_pages': 5,
+        'enabled': True
     },
     # Add more vehicle configurations...
 ]
 ```
+
+The URL can include the following parameters:
+- `manufacturer`: Manufacturer ID (required)
+- `model`: Model ID (required)
+- `price`: Price range in format "-1-60000" (optional, -1 means no minimum)
+- `km`: Kilometer range in format "-1-100000" (optional, -1 means no minimum)
+- Additional parameters as supported by Yad2
 
 ## Usage
 
