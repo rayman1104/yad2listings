@@ -12,15 +12,21 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yad2_user -d yad2_vehicles"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   bot:
     build: .
     env_file: .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
 
 volumes:
-  postgres_data: 
+  postgres_data:

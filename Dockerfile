@@ -24,7 +24,11 @@ COPY . .
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash bot
 RUN chown -R bot:bot /app
+
+# Make entrypoint script executable
+RUN chmod +x docker-entrypoint.sh
+
 USER bot
 
-# Command to run the application
-CMD ["python", "telegram_bot.py"] 
+# Set the entrypoint
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
