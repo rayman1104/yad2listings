@@ -4,3 +4,5 @@ venv/
 .env
 .vscode/
 *.session.sql
+.DS_Store
+logs/
