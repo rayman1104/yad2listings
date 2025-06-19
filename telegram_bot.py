@@ -4,6 +4,12 @@ import os
 import time
 from datetime import datetime
 from typing import List, Dict
+import json
+from pathlib import Path
+import requests
+from fake_useragent import UserAgent
+from urllib.parse import urlparse, parse_qs
+import random
 
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -11,7 +17,6 @@ from telegram.constants import ParseMode
 from dotenv import load_dotenv
 
 # Import our custom modules
-from scraper import VehicleScraper
 import yad2_parser
 from database import VehicleDatabase
 from config import get_enabled_vehicle_configs, BOT_SETTINGS, MESSAGE_SETTINGS, validate_environment
@@ -39,6 +44,10 @@ class Yad2TelegramBot:
         
         # Initialize database
         self.db = VehicleDatabase()
+        
+        # Create logs directory if it doesn't exist
+        self.logs_dir = Path("logs")
+        self.logs_dir.mkdir(exist_ok=True)
         
         # Initialize Telegram bot application
         self.application = Application.builder().token(self.bot_token).build()
@@ -73,10 +82,17 @@ The bot will automatically check for new vehicle ads every minute and send notif
         """Handle /status command"""
         status = "🟢 Monitoring is running" if self.is_monitoring else "🔴 Monitoring is stopped"
         
-        configs_text = "\n".join([
-            f"• {config['name']} (ID: {config['manufacturer']}-{config['model']})"
-            for config in self.search_configs
-        ])
+        configs_text = []
+        for config in self.search_configs:
+            # Extract manufacturer and model from URL
+            parsed_url = urlparse(config['url'])
+            params = parse_qs(parsed_url.query)
+            manufacturer = params.get('manufacturer', ['Unknown'])[0]
+            model = params.get('model', ['Unknown'])[0]
+            
+            configs_text.append(f"• {config['name']} (ID: {manufacturer}-{model})")
+        
+        configs_text = "\n".join(configs_text)
         
         message = f"""
 {status}
@@ -168,50 +184,125 @@ Newest entry: {stats['newest_entry']}
         except Exception as e:
             logger.error(f"Error sending notification for vehicle {vehicle['adNumber']}: {str(e)}")
     
+    def save_invalid_response(self, config: Dict, response, url: str):
+        """Save invalid response data for debugging"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"invalid_response_{timestamp}.log"
+            filepath = self.logs_dir / filename
+            
+            # Prepare metadata
+            metadata = {
+                "timestamp": timestamp,
+                "config_name": config['name'],
+                "url": url,
+                "response_length": len(response.content),
+                "status_code": response.status_code,
+                "headers": dict(response.headers)
+            }
+            
+            with open(filepath, "w", encoding="utf-8") as f:
+                # Write metadata
+                f.write("=== METADATA ===\n")
+                f.write(json.dumps(metadata, indent=2))
+                f.write("\n\n=== RESPONSE CONTENT ===\n")
+                # Write response content
+                f.write(response.content.decode("utf-8", errors="replace"))
+            
+            logger.warning(f"Saved invalid response to {filename}")
+            
+        except Exception as e:
+            logger.error(f"Error saving invalid response: {str(e)}")
+
     async def check_for_new_vehicles(self):
-        """Check for new vehicles for all configured searches"""
+        """Check for new vehicles and send notifications"""
         logger.info("Checking for new vehicles...")
+        
+        # List of Chrome versions to randomize from
+        chrome_versions = ["137.0.0.0", "136.0.0.0", "135.0.0.0", "134.0.0.0"]
         
         for config in self.search_configs:
             try:
-                manufacturer = config['manufacturer']
-                model = config['model']
+                url = config['url']
                 max_pages = config.get('max_pages', 5)
-                price_range = config.get('price_range')
-                km_range = config.get('km_range')
                 
-                logger.info(f"Checking {config['name']} (URL: {config.get('url')})")
-                
-                # Create a temporary scraper instance
-                scraper = VehicleScraper(
-                    output_dir="temp_bot_scraping",
-                    manufacturer=manufacturer,
-                    model=model,
-                    price_range=price_range,
-                    km_range=km_range
-                )
-                
-                # Fetch first page only for frequent checks
-                url = scraper.build_url(1)
+                logger.info(f"Checking {config['name']} (URL: {url})")
                 
                 # Add delay to avoid hitting rate limits
                 time.sleep(BOT_SETTINGS['rate_limit_delay'])
                 
-                response = scraper.session.get(
+                # Create a session for this request
+                session = requests.Session()
+                ua = UserAgent()
+                
+                # Generate random headers for each request
+                chrome_version = random.choice(chrome_versions)
+                headers = {
+                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'accept-encoding': 'gzip, deflate, br, zstd',
+                    'accept-language': 'en-US,en;q=0.9',
+                    'cache-control': 'max-age=0',
+                    'dnt': '1',
+                    'priority': 'u=0, i',
+                    'sec-ch-ua': f'"Chromium";v="{chrome_version.split(".")[0]}", "Not/A)Brand";v="24"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"macOS"',
+                    'sec-fetch-dest': 'document',
+                    'sec-fetch-mode': 'navigate',
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-user': '?1',
+                    'upgrade-insecure-requests': '1',
+                    'user-agent': f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36'
+                }
+                
+                # Set up cookies
+                cookies = {
+                    '__ssds': '3',
+                    'y2018-2-cohort': '43',
+                    'cohortGroup': 'C',
+                    'abTestKey': '15',
+                    '__uzma': '55da8501-f247-4a91-8a57-19c75987e296',
+                    '__uzmb': '1749975893',
+                    '__uzme': '6903',
+                    '__ssuzjsr3': 'a9be0cd8e',
+                    '__uzmaj3': '355eedea-b2ed-4c02-92ec-8dbc842b2fc2',
+                    '__uzmbj3': '1749975894',
+                    '__uzmlj3': 'tafY2FdZcjkgEC0K5j4s/f7RYtYhe/AhsioVyGyyTis=',
+                    'guest_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXlsb2FkIjp7InV1aWQiOiIxMTE3YWYwYS0yNDVlLTQxYzctOTg5Ni1iYzRlNmI2OTVlODcifSwiaWF0IjoxNzQ5OTc1ODk1LCJleHAiOjE3ODE1MzM0OTV9.aPPuJzDg7kGA5oshucuzEeGb99H09sCzdXZKR3Je_Rg',
+                    'recommendations-home-category': '{"categoryId":1,"subCategoryId":21}',
+                    'ab.storage.deviceId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3Ab60a4504-2f28-cdc6-e49b-3afb63388151%7Ce%3Aundefined%7Cc%3A1749975895194%7Cl%3A1750276630445',
+                    'ab.storage.sessionId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3A1996d7c1-6c54-2a4d-e158-c729f0a26cfb%7Ce%3A1750280714203%7Cc%3A1750276630445%7Cl%3A1750278914203',
+                    '__uzmcj3': '2413814212675',
+                    '__uzmdj3': '1750278914',
+                    '__uzmfj3': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975894222303020158-ec8e9d5c6f4125d4142',
+                    '__uzmd': '1750278921',
+                    '__uzmc': '5841822693326',
+                    '__uzmf': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975893057303028360-8c04c88bb204e1aa226',
+                    'uzmx': '7f900054e51021-3353-49b3-8035-06cb5dd2de064-1749975893057303028360-47282bc20cff04dd469'
+                }
+                
+                response = session.get(
                     url,
-                    headers=scraper.headers,
-                    cookies=scraper.cookies,
+                    headers=headers,
+                    cookies=cookies,
                     allow_redirects=True
                 )
                 response.raise_for_status()
                 
                 if len(response.content) < 50000 or b'__NEXT_DATA__' not in response.content:
                     logger.warning(f"Response seems invalid for {config['name']}")
+                    self.save_invalid_response(config, response, url)
                     continue
                 
                 # Parse the data
                 data = yad2_parser.extract_json_from_html(response.content.decode("utf-8"))
                 listings_data = data['props']['pageProps']['dehydratedState']['queries'][0]['state']['data']
+                
+                # Extract manufacturer and model from URL for database storage
+                parsed_url = urlparse(url)
+                params = parse_qs(parsed_url.query)
+                manufacturer = int(params.get('manufacturer', [0])[0])
+                model = int(params.get('model', [0])[0])
                 
                 # Process all listing types
                 all_vehicles = []

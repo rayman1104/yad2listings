@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 import yad2_parser
+from fake_useragent import UserAgent
+import random
 
 class VehicleScraper:
     def __init__(self, output_dir, manufacturer, model, price_range=None, km_range=None):
@@ -24,34 +26,35 @@ class VehicleScraper:
         self.price_range = price_range
         self.km_range = km_range
         self.session = requests.Session()
+        self.ua = UserAgent()
         
-        # Set up headers exactly as in the curl command
-        self.headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9,he;q=0.8',
-            'Cache-Control': 'max-age=0',
-            'Connection': 'keep-alive',
-            'DNT': '1',
-            'Referer': 'https://www.yad2.co.il/',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'sec-ch-ua': '"Chromium";v="131", "Not_A Brand";v="24"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"macOS"'
-        }
-        
+        # List of Chrome versions to randomize from
+        self.chrome_versions = ["137.0.0.0", "136.0.0.0", "135.0.0.0", "134.0.0.0"]
+
         # Set up cookies
         self.cookies = {
             '__ssds': '3',
-            'y2018-2-cohort': '88',
-            'use_elastic_search': '1',
-            'abTestKey': '2',
-            'cohortGroup': 'D'
-            # Note: Added only essential cookies. Add more if needed.
+            'y2018-2-cohort': '43',
+            'cohortGroup': 'C',
+            'abTestKey': '15',
+            '__uzma': '55da8501-f247-4a91-8a57-19c75987e296',
+            '__uzmb': '1749975893',
+            '__uzme': '6903',
+            '__ssuzjsr3': 'a9be0cd8e',
+            '__uzmaj3': '355eedea-b2ed-4c02-92ec-8dbc842b2fc2',
+            '__uzmbj3': '1749975894',
+            '__uzmlj3': 'tafY2FdZcjkgEC0K5j4s/f7RYtYhe/AhsioVyGyyTis=',
+            'guest_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXlsb2FkIjp7InV1aWQiOiIxMTE3YWYwYS0yNDVlLTQxYzctOTg5Ni1iYzRlNmI2OTVlODcifSwiaWF0IjoxNzQ5OTc1ODk1LCJleHAiOjE3ODE1MzM0OTV9.aPPuJzDg7kGA5oshucuzEeGb99H09sCzdXZKR3Je_Rg',
+            'recommendations-home-category': '{"categoryId":1,"subCategoryId":21}',
+            'ab.storage.deviceId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3Ab60a4504-2f28-cdc6-e49b-3afb63388151%7Ce%3Aundefined%7Cc%3A1749975895194%7Cl%3A1750276630445',
+            'ab.storage.sessionId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3A1996d7c1-6c54-2a4d-e158-c729f0a26cfb%7Ce%3A1750280714203%7Cc%3A1750276630445%7Cl%3A1750278914203',
+            '__uzmcj3': '2413814212675',
+            '__uzmdj3': '1750278914',
+            '__uzmfj3': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975894222303020158-ec8e9d5c6f4125d4142',
+            '__uzmd': '1750278921',
+            '__uzmc': '5841822693326',
+            '__uzmf': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975893057303028360-8c04c88bb204e1aa226',
+            'uzmx': '7f900054e51021-3353-49b3-8035-06cb5dd2de064-1749975893057303028360-47282bc20cff04dd469'
         }
         
         # Create output directory if it doesn't exist
@@ -63,6 +66,27 @@ class VehicleScraper:
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         self.logger = logging.getLogger(__name__)
+
+    def get_random_headers(self):
+        """Generate random headers for each request"""
+        chrome_version = random.choice(self.chrome_versions)
+        return {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-encoding': 'gzip, deflate, br, zstd',
+            'accept-language': 'en-US,en;q=0.9',
+            'cache-control': 'max-age=0',
+            'dnt': '1',
+            'priority': 'u=0, i',
+            'sec-ch-ua': f'"Chromium";v="{chrome_version.split(".")[0]}", "Not/A)Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36'
+        }
 
     def build_url(self, page_num):
         """Build the URL for a specific page number"""
@@ -123,7 +147,7 @@ class VehicleScraper:
             time.sleep(5)  # Rate limiting
             response = self.session.get(
                 url,
-                headers=self.headers,
+                headers=self.get_random_headers(),
                 cookies=self.cookies,
                 allow_redirects=True
             )

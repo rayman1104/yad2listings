@@ -7,6 +7,7 @@ DATABASE_URL=postgresql://username:password@localhost:5432/yad2_vehicles
 
 # Bot Configuration
 CHECK_INTERVAL_SECONDS=60
+RATE_LIMIT_DELAY=2
 
 # Optional: Additional configuration
-LOG_LEVEL=INFO 
+LOG_LEVEL=INFO
