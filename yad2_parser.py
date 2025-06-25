@@ -6,6 +6,12 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import os
 from pathlib import Path
+import requests
+import random
+from fake_useragent import UserAgent
+
+# Import the new HTTP utility module
+from http_utils import fetch_vehicle_details
 
 today = datetime.now().date().strftime("%y_%m_%d")
 
@@ -29,8 +35,27 @@ def get_month_number(month_text: str) -> int:
     return month_mapping.get(month_text, 1)  # Default to 1 if month not found
 
 def format_date(date_str: str) -> str:
-    # Parse ISO format and return YYYY-MM-DD
-    return datetime.fromisoformat(date_str).strftime('%Y-%m-%d')
+    """Parse various date formats and return YYYY-MM-DD"""
+    if not date_str or date_str.strip() == '':
+        return ''
+    
+    try:
+        # Remove 'Z' suffix if present and replace with '+00:00' for proper ISO format
+        if date_str.endswith('Z'):
+            date_str = date_str[:-1] + '+00:00'
+        
+        # Try to parse the date
+        dt = datetime.fromisoformat(date_str)
+        return dt.strftime('%Y-%m-%d')
+    except ValueError:
+        # Try alternative parsing methods
+        try:
+            # Try parsing as ISO format without timezone
+            dt = datetime.fromisoformat(date_str.replace('Z', ''))
+            return dt.strftime('%Y-%m-%d')
+        except ValueError:
+            # If all else fails, return empty string
+            return ''
 
 def calculate_years_since_production(production_year: int, production_month: int) -> float:
     production_date = datetime(production_year, production_month, 1)

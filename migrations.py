@@ -127,9 +127,77 @@ class MigrationRunner:
                     ON vehicles USING GIN (vehicle_data);
                 """
             },
+            {
+                'version': '002_change_primary_key_to_token',
+                'description': 'Change primary key from ad_number to token',
+                'sql': """
+                    -- Create new table with token as primary key
+                    CREATE TABLE IF NOT EXISTS vehicles_new (
+                        token TEXT PRIMARY KEY,
+                        manufacturer_id INTEGER NOT NULL,
+                        model_id INTEGER NOT NULL,
+                        price INTEGER,
+                        city TEXT,
+                        vehicle_data JSONB NOT NULL,
+                        first_seen TIMESTAMP DEFAULT NOW(),
+                        last_seen TIMESTAMP DEFAULT NOW(),
+                        is_sent BOOLEAN DEFAULT FALSE
+                    );
+                    
+                    -- Copy data from old table to new table, using token from vehicle_data
+                    INSERT INTO vehicles_new (
+                        token, manufacturer_id, model_id, price, city,
+                        vehicle_data, first_seen, last_seen, is_sent
+                    )
+                    SELECT 
+                        vehicle_data->>'token' as token,
+                        manufacturer_id,
+                        model_id,
+                        price,
+                        city,
+                        vehicle_data,
+                        first_seen,
+                        last_seen,
+                        is_sent
+                    FROM vehicles
+                    WHERE vehicle_data->>'token' IS NOT NULL
+                    AND vehicle_data->>'token' != '';
+                    
+                    -- Drop old table and rename new table
+                    DROP TABLE IF EXISTS vehicles;
+                    ALTER TABLE vehicles_new RENAME TO vehicles;
+                    
+                    -- Recreate indexes for the new structure
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_token 
+                    ON vehicles (token);
+                    
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_manufacturer_model 
+                    ON vehicles (manufacturer_id, model_id);
+                    
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_first_seen 
+                    ON vehicles (first_seen);
+                    
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_is_sent 
+                    ON vehicles (is_sent);
+                    
+                    -- JSONB indexes for common queries
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_price_range 
+                    ON vehicles USING GIN ((vehicle_data->'price'));
+                    
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_production_year 
+                    ON vehicles USING GIN ((vehicle_data->'productionDate'));
+                    
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_km 
+                    ON vehicles USING GIN ((vehicle_data->'km'));
+                    
+                    -- General JSONB index for other queries
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_data 
+                    ON vehicles USING GIN (vehicle_data);
+                """
+            },
             # Future migrations can be added here
             # {
-            #     'version': '002_add_new_column',
+            #     'version': '003_add_new_column',
             #     'description': 'Add new column for feature X',
             #     'sql': 'ALTER TABLE vehicles ADD COLUMN new_column TEXT;'
             # },
