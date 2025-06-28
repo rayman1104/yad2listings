@@ -64,6 +64,9 @@ class Yad2TelegramBot:
         
         self.is_monitoring = False
         
+        # Spam prevention for invalid response notifications
+        self.invalid_response_notification_sent = False
+        
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         welcome_message = """
@@ -185,6 +188,41 @@ Newest entry: {stats['newest_entry']}
         except Exception as e:
             logger.error(f"Error sending notification for vehicle {vehicle['token']}: {str(e)}")
     
+    async def send_invalid_response_notification(self, invalid_configs: List[str]):
+        """Send notification about invalid responses with spam prevention"""
+        if self.invalid_response_notification_sent:
+            logger.info("Skipping invalid response notification due to previous notification")
+            return
+        
+        try:
+            configs_text = "\n".join([f"• {config}" for config in invalid_configs])
+            
+            message = f"""
+⚠️ *Invalid Response Detected*
+
+The bot received invalid responses from Yad2 for the following configurations:
+{configs_text}
+
+This usually means a captcha needs to be solved. Please:
+1. Visit https://www.yad2.co.il/vehicles
+2. Solve any captcha that appears
+3. The bot will resume normal operation once the captcha is solved
+            """
+            
+            bot = Bot(token=self.bot_token)
+            await bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Update flag
+            self.invalid_response_notification_sent = True
+            logger.info(f"Sent invalid response notification for {len(invalid_configs)} configs")
+            
+        except Exception as e:
+            logger.error(f"Error sending invalid response notification: {str(e)}")
+
     def save_invalid_response(self, config: Dict, response, url: str):
         """Save invalid response data for debugging"""
         try:
@@ -229,6 +267,9 @@ Newest entry: {stats['newest_entry']}
         """Check for new vehicles and send notifications"""
         logger.info("Checking for new vehicles...")
         
+        # Track invalid responses to send one notification for all
+        invalid_configs = []
+        
         for config in self.search_configs:
             try:
                 url = config['url']
@@ -244,6 +285,7 @@ Newest entry: {stats['newest_entry']}
                 if not http_client.validate_response(response):
                     logger.warning(f"Response seems invalid for {config['name']}")
                     self.save_invalid_response(config, response, url)
+                    invalid_configs.append(config['name'])
                     continue
                 
                 # Parse the data
@@ -395,7 +437,16 @@ Newest entry: {stats['newest_entry']}
             except Exception as e:
                 logger.error(f"Error checking {config['name']}: {str(e)}")
                 continue
-    
+
+        # Send one notification for all invalid responses
+        if invalid_configs:
+            await self.send_invalid_response_notification(invalid_configs)
+        else:
+            # Reset the flag if all responses were valid
+            if self.invalid_response_notification_sent:
+                logger.info("All responses are now valid, resetting invalid response notification flag")
+                self.invalid_response_notification_sent = False
+
     async def monitoring_loop(self):
         """Main monitoring loop"""
         logger.info("Starting monitoring loop...")
