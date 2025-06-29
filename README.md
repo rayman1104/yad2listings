@@ -155,6 +155,66 @@ Beautiful Honda Civic in excellent condition...
 #NewAd #HondaCivic
 ```
 
+## Vehicle Price Analyzer
+
+The project includes a powerful vehicle price analysis dashboard that can work with both scraped data and database data.
+
+### Using the Analyzer with Database Data
+
+The vehicle analyzer can now use cars from the database instead of scraping new data:
+
+```bash
+# Analyze all vehicles in database
+python vehicle_analyzer.py --use-db
+
+# Analyze specific manufacturer/model from database
+python vehicle_analyzer.py --use-db --manufacturer 19 --model 12894
+
+# Filter by price range
+python vehicle_analyzer.py --use-db --db-filters '{"price_min": 50000, "price_max": 150000}'
+
+# Multiple filters
+python vehicle_analyzer.py --use-db --db-filters '{"price_min": 30000, "price_max": 100000, "km_max": 100000, "production_year_min": 2018}'
+```
+
+### Available Database Filters
+
+- `price_min`: Minimum price
+- `price_max`: Maximum price  
+- `km_max`: Maximum kilometers
+- `production_year_min`: Minimum production year
+- `make`: Vehicle make (e.g., 'Toyota')
+- `city`: City name
+
+### Using the Analyzer with Scraped Data
+
+For traditional scraping workflow:
+
+```bash
+# Scrape and analyze specific manufacturer/model
+python vehicle_analyzer.py --manufacturer 19 --model 12894 --max-pages 25
+
+# Use existing scraped data
+python vehicle_analyzer.py --skip-scrape --manufacturer 19 --model 12894
+```
+
+### Dashboard Features
+
+The interactive dashboard includes:
+- **Scatter plot** of vehicle prices vs. age
+- **Interactive filters** for km/year, hand, price range, model, etc.
+- **Exponential trend line** showing price depreciation
+- **Clickable points** that open vehicle ads in new tabs
+- **Summary statistics** with key metrics
+- **Real-time filtering** without page reloads
+
+### Example Usage Scenarios
+
+1. **Market Research**: Analyze price trends for specific models
+2. **Price Comparison**: Compare vehicles across different criteria
+3. **Investment Analysis**: Understand vehicle depreciation patterns
+4. **Inventory Management**: Review all vehicles in your database
+
 ## File Structure
 
 ```
@@ -162,7 +222,8 @@ Beautiful Honda Civic in excellent condition...
 ├── database.py          # PostgreSQL database handler
 ├── scraper.py          # Yad2 web scraper (existing)
 ├── yad2_parser.py      # HTML parser (existing)  
-├── vehicle_analyzer.py # Dashboard (existing)
+├── vehicle_analyzer.py # Interactive price analysis dashboard
+├── example_db_usage.py # Database usage examples
 ├── bootstrap.py        # Automated setup script
 ├── migrations.py       # Database migration system
 ├── setup.py           # Configuration testing script

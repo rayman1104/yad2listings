@@ -4,10 +4,15 @@ import argparse
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
+import psycopg2
+import psycopg2.extras
 
 # Import the scraper modules
 from scraper import VehicleScraper
 import yad2_parser
+
+# Import database module
+from database import VehicleDatabase
 
 # For web visualization
 import dash
@@ -30,6 +35,10 @@ def parse_arguments():
                         help='Maximum number of pages to scrape')
     parser.add_argument('--skip-scrape', action='store_true',
                         help='Skip scraping and use existing data')
+    parser.add_argument('--use-db', action='store_true',
+                        help='Use cars from database instead of scraping')
+    parser.add_argument('--db-filters', type=str, default='',
+                        help='Database filters in JSON format (e.g., \'{"price_min": 50000, "price_max": 150000}\')')
     parser.add_argument('--port', type=int, default=8050,
                         help='Port to run the web server on')
     return parser.parse_args()
@@ -40,6 +49,131 @@ def scrape_data(output_dir, manufacturer, model, max_pages):
     scraper = VehicleScraper(output_dir, manufacturer, model)
     scraper.scrape_pages(max_page=max_pages)
     
+def load_data_from_db(manufacturer_id=None, model_id=None, filters=None):
+    """Load vehicle data from database"""
+    print(f"Loading data from database for manufacturer={manufacturer_id}, model={model_id}...")
+    
+    try:
+        db = VehicleDatabase()
+        
+        # Prepare search filters
+        search_filters = {}
+        if filters:
+            import json
+            try:
+                search_filters = json.loads(filters)
+            except json.JSONDecodeError as e:
+                print(f"Error parsing database filters: {e}")
+                print("Using default filters")
+        
+        # Get vehicles from database using a custom query for manufacturer/model filtering
+        vehicles = []
+        
+        with db.get_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Build query with manufacturer and model filters
+                query = """
+                    SELECT token, price, city, vehicle_data, first_seen, last_seen, is_sent
+                    FROM vehicles
+                    WHERE 1=1
+                """
+                params = []
+                
+                # Add manufacturer filter
+                if manufacturer_id:
+                    query += " AND manufacturer_id = %s"
+                    params.append(manufacturer_id)
+                
+                # Add model filter
+                if model_id:
+                    query += " AND model_id = %s"
+                    params.append(model_id)
+                
+                # Add other filters from search_filters
+                if 'price_min' in search_filters:
+                    query += " AND (vehicle_data->>'price')::integer >= %s"
+                    params.append(search_filters['price_min'])
+                
+                if 'price_max' in search_filters:
+                    query += " AND (vehicle_data->>'price')::integer <= %s"
+                    params.append(search_filters['price_max'])
+                
+                if 'km_max' in search_filters:
+                    query += " AND (vehicle_data->>'km')::integer <= %s"
+                    params.append(search_filters['km_max'])
+                
+                if 'production_year_min' in search_filters:
+                    query += " AND EXTRACT(YEAR FROM (vehicle_data->>'productionDate')::date) >= %s"
+                    params.append(search_filters['production_year_min'])
+                
+                if 'make' in search_filters:
+                    query += " AND vehicle_data->>'make' = %s"
+                    params.append(search_filters['make'])
+                
+                if 'city' in search_filters:
+                    query += " AND city = %s"
+                    params.append(search_filters['city'])
+                
+                query += " ORDER BY first_seen DESC LIMIT 1000"
+                
+                cur.execute(query, params)
+                results = cur.fetchall()
+                
+                # Flatten results
+                for row in results:
+                    flattened = dict(row['vehicle_data'])
+                    flattened.update({
+                        'token': row['token'],
+                        'first_seen': row['first_seen'],
+                        'last_seen': row['last_seen'],
+                        'is_sent': row['is_sent']
+                    })
+                    vehicles.append(flattened)
+        
+        if not vehicles:
+            print("No vehicles found in database with the specified filters")
+            sys.exit(1)
+        
+        print(f"Found {len(vehicles)} vehicles in database")
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(vehicles)
+        
+        # Ensure required columns exist
+        required_columns = ['price', 'productionDate', 'km', 'hand', 'model', 'subModel', 'km_per_year', 'number_of_years', 'listingType', 'city', 'link']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"Warning: Missing columns in database data: {missing_columns}")
+            # Add missing columns with default values
+            for col in missing_columns:
+                if col == 'km_per_year':
+                    # Calculate km_per_year if we have km and productionDate
+                    if 'km' in df.columns and 'productionDate' in df.columns:
+                        df['productionDate'] = pd.to_datetime(df['productionDate'])
+                        current_year = datetime.now().year
+                        df['productionYear'] = df['productionDate'].dt.year
+                        df['number_of_years'] = current_year - df['productionYear']
+                        df['km_per_year'] = df['km'] / df['number_of_years'].clip(lower=1)
+                    else:
+                        df['km_per_year'] = 0
+                elif col == 'number_of_years':
+                    if 'productionDate' in df.columns:
+                        df['productionDate'] = pd.to_datetime(df['productionDate'])
+                        current_year = datetime.now().year
+                        df['productionYear'] = df['productionDate'].dt.year
+                        df['number_of_years'] = current_year - df['productionYear']
+                    else:
+                        df['number_of_years'] = 0
+                else:
+                    df[col] = ''
+        
+        return df
+        
+    except Exception as e:
+        print(f"Error loading data from database: {str(e)}")
+        sys.exit(1)
+
 def process_data(output_dir):
     """Process the scraped HTML files into a CSV"""
     print("Processing scraped HTML files...")
@@ -76,6 +210,35 @@ def load_data(csv_path):
     except Exception as e:
         print(f"Error loading data: {str(e)}")
         sys.exit(1)
+
+def prepare_dataframe(df):
+    """Prepare DataFrame for visualization (common processing for both CSV and DB data)"""
+    # Filter out cars with no price or price = 0
+    df = df[df['price'] > 0]
+    
+    # Convert date strings to datetime objects if they're strings
+    if df['productionDate'].dtype == 'object':
+        df['productionDate'] = pd.to_datetime(df['productionDate'])
+    
+    # Extract year from production date for easier filtering
+    df['productionYear'] = df['productionDate'].dt.year
+    
+    # Add a formatted production date for hover display
+    df['productionDateStr'] = df['productionDate'].dt.strftime('%Y-%m')
+    
+    # Ensure km_per_year is calculated if missing or invalid
+    if 'km_per_year' not in df.columns or df['km_per_year'].isna().any():
+        if 'km' in df.columns and 'number_of_years' in df.columns:
+            df['km_per_year'] = df['km'] / df['number_of_years'].clip(lower=1)
+        else:
+            df['km_per_year'] = 0
+    
+    # Ensure number_of_years is calculated if missing
+    if 'number_of_years' not in df.columns or df['number_of_years'].isna().any():
+        current_year = datetime.now().year
+        df['number_of_years'] = current_year - df['productionYear']
+    
+    return df
 
 def create_dashboard(df, port=8050):
     """Create and run an interactive Dash app for visualizing the data"""
@@ -797,20 +960,27 @@ def create_dashboard(df, port=8050):
 def main():
     args = parse_arguments()
     
-    # Create output directory if it doesn't exist
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Step 1: Scrape the data if not skipped
-    if not args.skip_scrape:
-        scrape_data(args.output_dir, args.manufacturer, args.model, args.max_pages)
-    
-    # Step 2: Process the scraped data
-    csv_path = process_data(args.output_dir)
-    
-    # Step 3: Load the data
-    df = load_data(csv_path)
-    os.unlink(csv_path)
+    if args.use_db:
+        # Use database data
+        print("Using database data...")
+        df = load_data_from_db(args.manufacturer, args.model, args.db_filters)
+        df = prepare_dataframe(df)
+    else:
+        # Use scraping workflow
+        # Create output directory if it doesn't exist
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Step 1: Scrape the data if not skipped
+        if not args.skip_scrape:
+            scrape_data(args.output_dir, args.manufacturer, args.model, args.max_pages)
+        
+        # Step 2: Process the scraped data
+        csv_path = process_data(args.output_dir)
+        
+        # Step 3: Load the data
+        df = load_data(csv_path)
+        os.unlink(csv_path)
     
     # Step 4: Create and run the dashboard
     create_dashboard(df, args.port)
