@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import logging
 from typing import List, Dict, Optional
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class VehicleDatabase:
                 # Create vehicles table with JSONB approach
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS vehicles (
-                        ad_number BIGINT PRIMARY KEY,
+                        token TEXT PRIMARY KEY,
                         manufacturer_id INTEGER NOT NULL,
                         model_id INTEGER NOT NULL,
                         price INTEGER,
@@ -58,8 +59,8 @@ class VehicleDatabase:
                 
                 # Essential indexes for performance
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_vehicles_ad_number 
-                    ON vehicles (ad_number)
+                    CREATE INDEX IF NOT EXISTS idx_vehicles_token 
+                    ON vehicles (token)
                 """)
                 
                 cur.execute("""
@@ -105,13 +106,18 @@ class VehicleDatabase:
     def _prepare_vehicle_data(self, vehicle: Dict) -> Dict:
         """Prepare vehicle data for JSONB storage"""
         # Extract main fields
-        ad_number = vehicle['adNumber']
+        token = vehicle.get('token', '')
+        if not token:
+            # Fallback to adNumber if token is not available
+            token = str(vehicle.get('adNumber', ''))
+        
         price = vehicle.get('price')
         city = vehicle.get('city', '')
         
         # Prepare JSONB data with all other fields
         vehicle_data = {
-            'adNumber': ad_number,  # Keep for backward compatibility
+            'adNumber': vehicle.get('adNumber'),  # Keep for backward compatibility
+            'token': token,  # Store token in JSONB as well
             'adType': vehicle.get('adType'),
             'model': vehicle.get('model'),
             'subModel': vehicle.get('subModel'),
@@ -134,7 +140,7 @@ class VehicleDatabase:
         # Remove None values to keep JSONB clean
         vehicle_data = {k: v for k, v in vehicle_data.items() if v is not None}
         
-        return ad_number, price, city, vehicle_data
+        return token, price, city, vehicle_data
     
     def save_vehicles(self, vehicles_data: List[Dict], manufacturer_id: int, model_id: int) -> List[Dict]:
         """
@@ -154,12 +160,12 @@ class VehicleDatabase:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 for vehicle in vehicles_data:
                     try:
-                        ad_number, price, city, vehicle_data = self._prepare_vehicle_data(vehicle)
+                        token, price, city, vehicle_data = self._prepare_vehicle_data(vehicle)
                         
                         # Check if vehicle already exists
                         cur.execute(
-                            "SELECT ad_number, first_seen FROM vehicles WHERE ad_number = %s",
-                            (ad_number,)
+                            "SELECT token, first_seen FROM vehicles WHERE token = %s",
+                            (token,)
                         )
                         existing = cur.fetchone()
                         
@@ -171,27 +177,27 @@ class VehicleDatabase:
                                     vehicle_data = %s,
                                     price = %s,
                                     city = %s
-                                WHERE ad_number = %s
-                            """, (psycopg2.extras.Json(vehicle_data), price, city, ad_number))
+                                WHERE token = %s
+                            """, (psycopg2.extras.Json(vehicle_data), price, city, token))
                         else:
                             # Insert new vehicle
                             cur.execute("""
                                 INSERT INTO vehicles (
-                                    ad_number, manufacturer_id, model_id, price, city,
+                                    token, manufacturer_id, model_id, price, city,
                                     vehicle_data, first_seen, last_seen
                                 ) VALUES (
                                     %s, %s, %s, %s, %s, %s, NOW(), NOW()
                                 )
-                            """, (ad_number, manufacturer_id, model_id, price, city, 
+                            """, (token, manufacturer_id, model_id, price, city, 
                                   psycopg2.extras.Json(vehicle_data)))
                             
                             # Create a full vehicle dict for backward compatibility
-                            full_vehicle = {'ad_number': ad_number, 'price': price, 'city': city, **vehicle_data}
+                            full_vehicle = {'token': token, 'price': price, 'city': city, **vehicle_data}
                             new_vehicles.append(full_vehicle)
-                            logger.info(f"New vehicle added: {ad_number}")
+                            logger.info(f"New vehicle added: {token}")
                     
                     except Exception as e:
-                        logger.error(f"Error saving vehicle {vehicle.get('adNumber', 'unknown')}: {str(e)}")
+                        logger.error(f"Error saving vehicle {vehicle.get('token', 'unknown')}: {str(e)}")
                         continue
                 
                 conn.commit()
@@ -199,23 +205,56 @@ class VehicleDatabase:
         logger.info(f"Processed {len(vehicles_data)} vehicles, found {len(new_vehicles)} new ones")
         return new_vehicles
     
-    def mark_as_sent(self, ad_numbers: List[int]):
+    def mark_as_sent(self, tokens: List[str]):
         """Mark vehicles as sent to avoid sending duplicates"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE vehicles SET is_sent = TRUE WHERE ad_number = ANY(%s)",
-                    (ad_numbers,)
+                    "UPDATE vehicles SET is_sent = TRUE WHERE token = ANY(%s)",
+                    (tokens,)
                 )
                 conn.commit()
-                logger.info(f"Marked {len(ad_numbers)} vehicles as sent")
+                logger.info(f"Marked {len(tokens)} vehicles as sent")
+    
+    def update_vehicle_details(self, token: str, description: str = None, city: str = None, km: int = None):
+        """Update vehicle details after fetching from individual page"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                update_parts = []
+                params = []
+                
+                if description is not None:
+                    update_parts.append("vehicle_data = jsonb_set(vehicle_data, '{description}', %s)")
+                    params.append(json.dumps(description))
+                
+                if city is not None:
+                    update_parts.append("city = %s")
+                    params.append(city)
+                
+                if km is not None:
+                    update_parts.append("vehicle_data = jsonb_set(vehicle_data, '{km}', %s)")
+                    params.append(json.dumps(km))
+                
+                if update_parts:
+                    params.append(token)
+                    query = f"""
+                        UPDATE vehicles 
+                        SET {', '.join(update_parts)}
+                        WHERE token = %s
+                    """
+                    cur.execute(query, params)
+                    conn.commit()
+                    logger.info(f"Updated details for vehicle {token}")
+                    return True
+                
+                return False
     
     def get_unsent_vehicles(self, manufacturer_id: int = None, model_id: int = None, limit: int = 10) -> List[Dict]:
         """Get vehicles that haven't been sent yet"""
         with self.get_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 query = """
-                    SELECT ad_number, price, city, vehicle_data, first_seen, last_seen, is_sent
+                    SELECT token, price, city, vehicle_data, first_seen, last_seen, is_sent
                     FROM vehicles 
                     WHERE is_sent = FALSE
                 """
@@ -240,7 +279,7 @@ class VehicleDatabase:
                 for row in results:
                     flattened = dict(row['vehicle_data'])
                     flattened.update({
-                        'ad_number': row['ad_number'],
+                        'token': row['token'],
                         'first_seen': row['first_seen'],
                         'last_seen': row['last_seen'],
                         'is_sent': row['is_sent']
@@ -333,7 +372,7 @@ class VehicleDatabase:
                 
                 # Build query
                 base_query = """
-                    SELECT ad_number, price, city, vehicle_data, first_seen, last_seen, is_sent
+                    SELECT token, price, city, vehicle_data, first_seen, last_seen, is_sent
                     FROM vehicles
                 """
                 
@@ -353,7 +392,7 @@ class VehicleDatabase:
                 for row in results:
                     flattened = dict(row['vehicle_data'])
                     flattened.update({
-                        'ad_number': row['ad_number'],
+                        'token': row['token'],
                         'first_seen': row['first_seen'],
                         'last_seen': row['last_seen'],
                         'is_sent': row['is_sent']
@@ -361,3 +400,35 @@ class VehicleDatabase:
                     flattened_results.append(flattened)
                 
                 return flattened_results
+
+    def vehicle_exists(self, token: str) -> bool:
+        """Check if a vehicle exists in the database by token"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM vehicles WHERE token = %s",
+                    (token,)
+                )
+                return cur.fetchone() is not None
+
+    def get_vehicle_by_token(self, token: str) -> Optional[Dict]:
+        """Get vehicle data by token"""
+        with self.get_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT token, price, city, vehicle_data, first_seen, last_seen, is_sent
+                    FROM vehicles WHERE token = %s
+                """, (token,))
+                result = cur.fetchone()
+                
+                if result:
+                    # Flatten the result for backward compatibility
+                    flattened = dict(result['vehicle_data'])
+                    flattened.update({
+                        'token': result['token'],
+                        'first_seen': result['first_seen'],
+                        'last_seen': result['last_seen'],
+                        'is_sent': result['is_sent']
+                    })
+                    return flattened
+                return None

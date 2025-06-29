@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 import yad2_parser
 from database import VehicleDatabase
 from config import get_enabled_vehicle_configs, BOT_SETTINGS, MESSAGE_SETTINGS, validate_environment
+from http_utils import http_client, fetch_vehicle_details
 
 # Load environment variables
 load_dotenv()
@@ -62,6 +63,9 @@ class Yad2TelegramBot:
         self.application.add_handler(CommandHandler("test", self.test_command))
         
         self.is_monitoring = False
+        
+        # Spam prevention for invalid response notifications
+        self.invalid_response_notification_sent = False
         
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -180,10 +184,45 @@ Newest entry: {stats['newest_entry']}
                 parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             )
-            logger.info(f"Sent notification for vehicle {vehicle['adNumber']}")
+            logger.info(f"Sent notification for vehicle {vehicle['token']}")
         except Exception as e:
-            logger.error(f"Error sending notification for vehicle {vehicle['adNumber']}: {str(e)}")
+            logger.error(f"Error sending notification for vehicle {vehicle['token']}: {str(e)}")
     
+    async def send_invalid_response_notification(self, invalid_configs: List[str]):
+        """Send notification about invalid responses with spam prevention"""
+        if self.invalid_response_notification_sent:
+            logger.info("Skipping invalid response notification due to previous notification")
+            return
+        
+        try:
+            configs_text = "\n".join([f"• {config}" for config in invalid_configs])
+            
+            message = f"""
+⚠️ *Invalid Response Detected*
+
+The bot received invalid responses from Yad2 for the following configurations:
+{configs_text}
+
+This usually means a captcha needs to be solved. Please:
+1. Visit https://www.yad2.co.il/vehicles
+2. Solve any captcha that appears
+3. The bot will resume normal operation once the captcha is solved
+            """
+            
+            bot = Bot(token=self.bot_token)
+            await bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Update flag
+            self.invalid_response_notification_sent = True
+            logger.info(f"Sent invalid response notification for {len(invalid_configs)} configs")
+            
+        except Exception as e:
+            logger.error(f"Error sending invalid response notification: {str(e)}")
+
     def save_invalid_response(self, config: Dict, response, url: str):
         """Save invalid response data for debugging"""
         try:
@@ -214,12 +253,22 @@ Newest entry: {stats['newest_entry']}
         except Exception as e:
             logger.error(f"Error saving invalid response: {str(e)}")
 
+    def safe_format_date(self, date_str: str) -> str:
+        """Safely format date string, returning empty string if invalid"""
+        try:
+            if not date_str or date_str.strip() == '':
+                return ''
+            return yad2_parser.format_date(date_str)
+        except Exception as e:
+            logger.warning(f"Error formatting date '{date_str}': {str(e)}")
+            return ''
+
     async def check_for_new_vehicles(self):
         """Check for new vehicles and send notifications"""
         logger.info("Checking for new vehicles...")
         
-        # List of Chrome versions to randomize from
-        chrome_versions = ["137.0.0.0", "136.0.0.0", "135.0.0.0", "134.0.0.0"]
+        # Track invalid responses to send one notification for all
+        invalid_configs = []
         
         for config in self.search_configs:
             try:
@@ -231,67 +280,12 @@ Newest entry: {stats['newest_entry']}
                 # Add delay to avoid hitting rate limits
                 time.sleep(BOT_SETTINGS['rate_limit_delay'])
                 
-                # Create a session for this request
-                session = requests.Session()
-                ua = UserAgent()
+                response = http_client.get(url, include_priority=True)
                 
-                # Generate random headers for each request
-                chrome_version = random.choice(chrome_versions)
-                headers = {
-                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'accept-encoding': 'gzip, deflate, br, zstd',
-                    'accept-language': 'en-US,en;q=0.9',
-                    'cache-control': 'max-age=0',
-                    'dnt': '1',
-                    'priority': 'u=0, i',
-                    'sec-ch-ua': f'"Chromium";v="{chrome_version.split(".")[0]}", "Not/A)Brand";v="24"',
-                    'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"macOS"',
-                    'sec-fetch-dest': 'document',
-                    'sec-fetch-mode': 'navigate',
-                    'sec-fetch-site': 'same-origin',
-                    'sec-fetch-user': '?1',
-                    'upgrade-insecure-requests': '1',
-                    'user-agent': f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36'
-                }
-                
-                # Set up cookies
-                cookies = {
-                    '__ssds': '3',
-                    'y2018-2-cohort': '43',
-                    'cohortGroup': 'C',
-                    'abTestKey': '15',
-                    '__uzma': '55da8501-f247-4a91-8a57-19c75987e296',
-                    '__uzmb': '1749975893',
-                    '__uzme': '6903',
-                    '__ssuzjsr3': 'a9be0cd8e',
-                    '__uzmaj3': '355eedea-b2ed-4c02-92ec-8dbc842b2fc2',
-                    '__uzmbj3': '1749975894',
-                    '__uzmlj3': 'tafY2FdZcjkgEC0K5j4s/f7RYtYhe/AhsioVyGyyTis=',
-                    'guest_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXlsb2FkIjp7InV1aWQiOiIxMTE3YWYwYS0yNDVlLTQxYzctOTg5Ni1iYzRlNmI2OTVlODcifSwiaWF0IjoxNzQ5OTc1ODk1LCJleHAiOjE3ODE1MzM0OTV9.aPPuJzDg7kGA5oshucuzEeGb99H09sCzdXZKR3Je_Rg',
-                    'recommendations-home-category': '{"categoryId":1,"subCategoryId":21}',
-                    'ab.storage.deviceId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3Ab60a4504-2f28-cdc6-e49b-3afb63388151%7Ce%3Aundefined%7Cc%3A1749975895194%7Cl%3A1750276630445',
-                    'ab.storage.sessionId.716d3f2d-2039-4ea6-bd67-0782ecd0770b': 'g%3A1996d7c1-6c54-2a4d-e158-c729f0a26cfb%7Ce%3A1750280714203%7Cc%3A1750276630445%7Cl%3A1750278914203',
-                    '__uzmcj3': '2413814212675',
-                    '__uzmdj3': '1750278914',
-                    '__uzmfj3': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975894222303020158-ec8e9d5c6f4125d4142',
-                    '__uzmd': '1750278921',
-                    '__uzmc': '5841822693326',
-                    '__uzmf': '7f60009709b3d1-eafe-4ff9-a1fc-9e818d8e16071749975893057303028360-8c04c88bb204e1aa226',
-                    'uzmx': '7f900054e51021-3353-49b3-8035-06cb5dd2de064-1749975893057303028360-47282bc20cff04dd469'
-                }
-                
-                response = session.get(
-                    url,
-                    headers=headers,
-                    cookies=cookies,
-                    allow_redirects=True
-                )
-                response.raise_for_status()
-                
-                if len(response.content) < 50000 or b'__NEXT_DATA__' not in response.content:
+                if not http_client.validate_response(response):
                     logger.warning(f"Response seems invalid for {config['name']}")
                     self.save_invalid_response(config, response, url)
+                    invalid_configs.append(config['name'])
                     continue
                 
                 # Parse the data
@@ -311,49 +305,104 @@ Newest entry: {stats['newest_entry']}
                     if vehicles_list:
                         # Convert to the format expected by our database
                         processed_vehicles = []
+                        
                         for vehicle_raw in vehicles_list:
                             try:
-                                # Use the same processing logic as yad2_parser
+                                # Check for essential fields first - use token as primary key
+                                if 'token' not in vehicle_raw:
+                                    logger.warning("Skipping vehicle without token")
+                                    continue
+                                
+                                if 'vehicleDates' not in vehicle_raw:
+                                    logger.warning(f"Skipping vehicle {vehicle_raw.get('token', 'unknown')} without vehicleDates")
+                                    continue
+                                
+                                # Check if vehicle already exists in database
+                                if self.db.vehicle_exists(vehicle_raw['token']):
+                                    logger.debug(f"Vehicle {vehicle_raw['token']} already exists in database, skipping")
+                                    continue
+                                
+                                # Use the same processing logic as yad2_parser but adapted for new structure
                                 year = vehicle_raw['vehicleDates']['yearOfProduction']
                                 month = yad2_parser.get_month_number(
                                     vehicle_raw['vehicleDates'].get('monthOfProduction', {"text": "ינואר"})['text']
-                                )
+                                ) if 'monthOfProduction' in vehicle_raw['vehicleDates'] else 1
                                 production_date = f"{year}-{month:02d}-01"
                                 
                                 years_since_production = yad2_parser.calculate_years_since_production(year, month)
-                                km = vehicle_raw['km']
-                                km_per_year = round(km / years_since_production if years_since_production > 0 else km, 2)
+                                
+                                # Handle missing km field - try to extract from subModel or use 0
+                                km = 0
+                                submodel_text = vehicle_raw.get('subModel', {}).get('text', '')
+                                # Try to extract km from subModel text if available
+                                import re
+                                km_match = re.search(r'(\d{1,3}(?:,\d{3})*|\d+)\s*ק״מ', submodel_text)
+                                if km_match:
+                                    km_str = km_match.group(1).replace(',', '')
+                                    km = int(km_str)
                                 
                                 # Extract HP from subModel text
-                                import re
-                                hp_match = re.search(r'(\d+)\s*כ״ס', vehicle_raw['subModel']['text'])
+                                hp_match = re.search(r'(\d+)\s*כ״ס', submodel_text)
                                 hp = int(hp_match.group(1)) if hp_match else 0
                                 
+                                # Initialize description and city with default values
+                                description = vehicle_raw.get("metaData", {}).get("description", '')
+                                city = vehicle_raw.get('address', {}).get('area', {}).get('text', 'Unknown')
+                                
+                                # Only fetch details if we're missing important data AND this is a new vehicle
+                                if km == 0:
+                                    logger.info(f"Fetching full details for new vehicle {vehicle_raw['token']} from individual page...")
+                                    vehicle_details = await fetch_vehicle_details(vehicle_raw['token'])
+                                    
+                                    if vehicle_details:
+                                        # Update km if it was missing or if we got better data
+                                        if km == 0 and 'km' in vehicle_details:
+                                            km = vehicle_details['km']
+                                            logger.info(f"Found KM {km} for vehicle {vehicle_raw['token']} from individual page")
+                                        
+                                        # Update description and location if available
+                                        if 'description' in vehicle_details:
+                                            description = vehicle_details['description']
+                                            logger.info(f"Updated description for vehicle {vehicle_raw['token']}")
+                                        if 'city' in vehicle_details:
+                                            city = vehicle_details['city']
+                                            logger.info(f"Updated city to '{city}' for vehicle {vehicle_raw['token']}")
+                                    
+                                    # Small delay to avoid overwhelming the server
+                                    await asyncio.sleep(0.5)
+                                
+                                km_per_year = round(km / years_since_production if years_since_production > 0 else km, 2)
+                                
+                                # Handle missing dates - use current time or empty strings
+                                current_time = datetime.now().isoformat()
+                                
                                 processed_vehicle = {
-                                    'adNumber': vehicle_raw['adNumber'],
-                                    'price': vehicle_raw['price'],
-                                    'city': vehicle_raw['address'].get('city', {"text": ""})['text'],
-                                    'adType': vehicle_raw['adType'],
-                                    'model': vehicle_raw['model']['text'],
-                                    'subModel': vehicle_raw['subModel']['text'],
+                                    'token': vehicle_raw['token'],  # Use token as primary key
+                                    'adNumber': vehicle_raw.get('orderId', ''),  # Keep for backward compatibility
+                                    'price': vehicle_raw.get('price', 0),
+                                    'city': city,
+                                    'adType': vehicle_raw.get('adType', ''),
+                                    'model': vehicle_raw.get('model', {}).get('text', ''),
+                                    'subModel': submodel_text,
                                     'hp': hp,
-                                    'make': vehicle_raw['manufacturer']['text'],
+                                    'make': vehicle_raw.get('manufacturer', {}).get('text', ''),
                                     'productionDate': production_date,
-                                    'km': vehicle_raw['km'],
-                                    'hand': vehicle_raw['hand']["id"],
-                                    'createdAt': yad2_parser.format_date(vehicle_raw['dates']['createdAt']),
-                                    'updatedAt': yad2_parser.format_date(vehicle_raw['dates']['updatedAt']),
-                                    'rebouncedAt': yad2_parser.format_date(vehicle_raw['dates']['rebouncedAt']),
+                                    'km': km,
+                                    'hand': vehicle_raw.get('hand', {}).get('id', 0),
+                                    'createdAt': current_time,  # Use current time since dates are missing
+                                    'updatedAt': current_time,
+                                    'rebouncedAt': '',
                                     'listingType': listing_type,
                                     'number_of_years': years_since_production,
                                     'km_per_year': km_per_year,
-                                    'description': vehicle_raw["metaData"]["description"],
-                                    'link': f'https://www.yad2.co.il/vehicles/item/{vehicle_raw["token"]}',
+                                    'description': description,
+                                    'link': f'https://www.yad2.co.il/vehicles/item/{vehicle_raw.get("token", "")}',
                                 }
                                 processed_vehicles.append(processed_vehicle)
                                 
                             except Exception as e:
                                 logger.error(f"Error processing vehicle: {str(e)}")
+                                logger.debug(f"Vehicle data: {vehicle_raw}")
                                 continue
                         
                         all_vehicles.extend(processed_vehicles)
@@ -369,7 +418,7 @@ Newest entry: {stats['newest_entry']}
                     for vehicle in vehicles_to_notify:
                         await self.send_vehicle_notification(vehicle)
                         # Mark as sent immediately
-                        self.db.mark_as_sent([vehicle['adNumber']])
+                        self.db.mark_as_sent([vehicle['token']])
                         
                         # Small delay between notifications
                         await asyncio.sleep(1)
@@ -388,7 +437,16 @@ Newest entry: {stats['newest_entry']}
             except Exception as e:
                 logger.error(f"Error checking {config['name']}: {str(e)}")
                 continue
-    
+
+        # Send one notification for all invalid responses
+        if invalid_configs:
+            await self.send_invalid_response_notification(invalid_configs)
+        else:
+            # Reset the flag if all responses were valid
+            if self.invalid_response_notification_sent:
+                logger.info("All responses are now valid, resetting invalid response notification flag")
+                self.invalid_response_notification_sent = False
+
     async def monitoring_loop(self):
         """Main monitoring loop"""
         logger.info("Starting monitoring loop...")
