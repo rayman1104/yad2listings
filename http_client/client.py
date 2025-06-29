@@ -104,7 +104,7 @@ async def fetch_vehicle_details(vehicle_token: str) -> Dict:
             return {}
         
         # Parse the data
-        from yad2_parser import extract_json_from_html
+        from parser import extract_json_from_html
         data = extract_json_from_html(response.content.decode("utf-8"))
         
         # Extract vehicle details from the page

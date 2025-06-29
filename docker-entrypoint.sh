@@ -16,7 +16,7 @@ wait_for_postgres
 
 # Run migrations
 echo "Running database migrations..."
-python migrations.py
+python database/migrations.py
 
 # Start the bot
 echo "Starting Telegram bot..."

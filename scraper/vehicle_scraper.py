@@ -4,10 +4,10 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
-import yad2_parser
+from parser import yad2_parser
 from fake_useragent import UserAgent
 import random
-from http_utils import http_client
+from http_client import http_client
 
 class VehicleScraper:
     def __init__(self, output_dir, manufacturer, model, price_range=None, km_range=None):

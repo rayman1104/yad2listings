@@ -10,8 +10,7 @@ import requests
 import random
 from fake_useragent import UserAgent
 
-# Import the new HTTP utility module
-from http_utils import fetch_vehicle_details
+from http_client import fetch_vehicle_details
 
 today = datetime.now().date().strftime("%y_%m_%d")
 

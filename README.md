@@ -65,7 +65,7 @@ CHECK_INTERVAL_SECONDS=60
 3. Set up database (if not using bootstrap):
 ```bash
 # Run database migrations
-python migrations.py
+python database/migrations.py
 
 # Or test the full setup
 python setup.py
@@ -215,23 +215,6 @@ The interactive dashboard includes:
 3. **Investment Analysis**: Understand vehicle depreciation patterns
 4. **Inventory Management**: Review all vehicles in your database
 
-## File Structure
-
-```
-├── telegram_bot.py      # Main bot application
-├── database.py          # PostgreSQL database handler
-├── scraper.py          # Yad2 web scraper (existing)
-├── yad2_parser.py      # HTML parser (existing)  
-├── vehicle_analyzer.py # Interactive price analysis dashboard
-├── example_db_usage.py # Database usage examples
-├── bootstrap.py        # Automated setup script
-├── migrations.py       # Database migration system
-├── setup.py           # Configuration testing script
-├── requirements.txt    # Python dependencies
-├── env_example.txt     # Environment variables template
-└── README.md          # This file
-```
-
 ## Database Schema
 
 The bot creates a `vehicles` table with the following columns:
@@ -249,13 +232,13 @@ The project includes a migration system for managing schema changes:
 
 ```bash
 # Run all pending migrations
-python migrations.py
+python database/migrations.py
 
 # Check migration status
-python migrations.py status
+python database/migrations.py status
 ```
 
-New migrations can be added to the `migrations.py` file for future schema changes.
+New migrations can be added to the `database/migrations.py` file for future schema changes.
 
 ## Customization
 

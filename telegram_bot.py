@@ -17,10 +17,10 @@ from telegram.constants import ParseMode
 from dotenv import load_dotenv
 
 # Import our custom modules
-import yad2_parser
+from parser import yad2_parser
 from database import VehicleDatabase
 from config import get_enabled_vehicle_configs, BOT_SETTINGS, MESSAGE_SETTINGS, validate_environment
-from http_utils import http_client, fetch_vehicle_details
+from http_client import http_client, fetch_vehicle_details
 
 # Load environment variables
 load_dotenv()

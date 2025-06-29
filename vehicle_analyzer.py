@@ -7,11 +7,9 @@ from datetime import datetime
 import psycopg2
 import psycopg2.extras
 
-# Import the scraper modules
+# custom modules
 from scraper import VehicleScraper
-import yad2_parser
-
-# Import database module
+from parser import yad2_parser
 from database import VehicleDatabase
 
 # For web visualization
